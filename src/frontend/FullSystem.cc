@@ -16,12 +16,14 @@
 #include <iomanip>
 #include <opencv2/highgui/highgui.hpp>
 
+#include "monodepth2/monodepth.h"
 using namespace ldso;
 using namespace ldso::internal;
-
+using namespace ldso::monodepth2;
+using namespace std;
 namespace ldso {
 
-    FullSystem::FullSystem(shared_ptr<ORBVocabulary> voc) :
+    FullSystem::FullSystem(shared_ptr<ORBVocabulary> voc, const std::string &m_path) :
         coarseDistanceMap(new CoarseDistanceMap(wG[0], hG[0])),
         coarseTracker(new CoarseTracker(wG[0], hG[0])),
         coarseTracker_forNewKF(new CoarseTracker(wG[0], hG[0])),
@@ -29,13 +31,7 @@ namespace ldso {
         ef(new EnergyFunctional()),
         Hcalib(new Camera(fxG[0], fyG[0], cxG[0], cyG[0])),
         globalMap(new Map(this)),
-        vocab(voc) {
-
-        LOG(INFO) << "This is Direct Sparse Odometry, a fully direct VO proposed by TUM vision group."
-            "For more information about dso, see Direct Sparse Odometry, J. Engel, V. Koltun, "
-            "D. Cremers, In arXiv:1607.02565, 2016. For loop closing part, see "
-            "LDSO: Direct Sparse Odometry with Loop Closure, X. Gao, R. Wang, N. Demmel, D. Cremers, "
-            "In International Conference on Intelligent Robots and Systems (IROS), 2018 " << endl;
+        vocab(voc){
 
         Hcalib->CreateCH(Hcalib);
         lastCoarseRMSE.setConstant(100);
@@ -44,6 +40,8 @@ namespace ldso {
 
         pixelSelector = shared_ptr<PixelSelector>(new PixelSelector(wG[0], hG[0]));
         selectionMap = new float[wG[0] * hG[0]];
+
+        depthPredictor = shared_ptr<MonoDepth>(new MonoDepth(m_path, needGPU));
 
         if (setting_enableLoopClosing) {
             loopClosing = shared_ptr<LoopClosing>(new LoopClosing(this));
@@ -86,7 +84,7 @@ namespace ldso {
             LOG(INFO) << "Initializing ... " << endl;
             // use initializer
             if (coarseInitializer->frameID < 0) {   // first frame not set, set it
-                coarseInitializer->setFirst(Hcalib->mpCH, fh);
+                coarseInitializer->setFirst(Hcalib->mpCH, fh, getDepthMap(fh));
             } else if (coarseInitializer->trackFrame(fh)) {
                 // init succeeded
                 initializeFromInitializer(fh);
@@ -1287,6 +1285,12 @@ namespace ldso {
             int numPointsTotal = pixelSelector->makeMaps(newFrame, selectionMap, setting_desiredImmatureDensity);
             newFrame->frame->features.reserve(numPointsTotal);
 
+            cv::Mat depth = getDepthMap(newFrame);
+
+            for (IOWrap::Output3DWrapper *ow : outputWrapper)
+                ow->pushCNNImage(depth);
+            float* depthmap_ptr = (float*) depth.data;
+
             for (int y = patternPadding + 1; y < hG[0] - patternPadding - 2; y++)
                 for (int x = patternPadding + 1; x < wG[0] - patternPadding - 2; x++) {
                     int i = x + y * wG[0];
@@ -1295,6 +1299,10 @@ namespace ldso {
                     shared_ptr<Feature> feat(new Feature(x, y, newFrame->frame));
                     feat->ip = shared_ptr<ImmaturePoint>(
                         new ImmaturePoint(newFrame->frame, feat, selectionMap[i], Hcalib->mpCH));
+                    feat->ip->idepth_max = *(depthmap_ptr+i);
+                    feat->ip->idepth_min = *(depthmap_ptr+i);
+                    if(feat->ip->idepth_min<0) feat->ip->idepth_min=0;
+                    
                     if (!std::isfinite(feat->ip->energyTH)) {
                         feat->ReleaseAll();
                         continue;
@@ -1386,6 +1394,92 @@ namespace ldso {
         SE3 firstToNew = coarseInitializer->thisToNext;
         firstToNew.translation() /= rescaleFactor;
 
+        // really no lock required, as we are initializing.
+        {
+            unique_lock<mutex> crlock(shellPoseMutex);
+            firstFrame->setEvalPT_scaled(fr->getPose(), firstFrame->frame->aff_g2l);
+            newFrame->frame->setPose(firstToNew);
+            newFrame->setEvalPT_scaled(newFrame->frame->getPose(), newFrame->frame->aff_g2l);
+        }
+
+        initialized = true;
+        globalMap->AddKeyFrame(fr);
+        LOG(INFO) << "Initialized from initializer, points: " << firstFrame->frame->features.size() << endl;
+    }
+
+    void FullSystem::initializeFromInitializerCNN(shared_ptr<FrameHessian> newFrame){
+         unique_lock<mutex> lock(mapMutex);
+
+        shared_ptr<FrameHessian> firstFrame = coarseInitializer->firstFrame;
+        shared_ptr<Frame> fr = firstFrame->frame;
+        firstFrame->idx = frames.size();
+
+        frames.push_back(fr);
+        firstFrame->frameID = globalMap->NumFrames();
+        ef->insertFrame(firstFrame, Hcalib->mpCH);
+        setPrecalcValues();
+
+        fr->features.reserve(wG[0] * hG[0] * 0.2f);
+
+        float sumID = 1e-5, numID = 1e-5;
+        for (int i = 0; i < coarseInitializer->numPoints[0]; i++) {
+            sumID += coarseInitializer->points[0][i].iR;
+            numID++;
+        }
+       
+        // randomly sub-select the points I need.
+        float keepPercentage = setting_desiredPointDensity / coarseInitializer->numPoints[0];
+
+        LOG(INFO) << "Initialization: keep " << 100 * keepPercentage << " (need " << setting_desiredPointDensity
+                  << ", have " << coarseInitializer->numPoints[0] << ")!" << endl;
+        
+        cv::Mat depth = getDepthMap(firstFrame);
+
+	    float* depthmap_ptr = (float*) depth.data;
+        // Create features in the first frame.
+        for (size_t i = 0; i < size_t(coarseInitializer->numPoints[0]); i++) {
+
+            if (rand() / (float) RAND_MAX > keepPercentage)
+                continue;
+            Pnt *point = coarseInitializer->points[0] + i;
+
+            shared_ptr<Feature> feat(new Feature(point->u + 0.5f, point->v + 0.5f, firstFrame->frame));
+            feat->ip = shared_ptr<ImmaturePoint>(
+                new ImmaturePoint(firstFrame->frame, feat, point->my_type, Hcalib->mpCH));
+            
+            float idepth = *(depthmap_ptr + int((point->v*wG[0]+point->u+0.5f)));
+            float depth=1.0/idepth;
+            float var = 1.0/(6*depth);
+            feat->ip->idepth_max=idepth;
+            feat->ip->idepth_min=idepth;
+            if(feat->ip->idepth_min<0) feat->ip->idepth_min=0;
+
+            if (!std::isfinite(feat->ip->energyTH)) {
+                feat->ReleaseImmature();
+                continue;
+            }
+
+            feat->CreateFromImmature();
+            shared_ptr<PointHessian> ph = feat->point->mpPH;
+            if (!std::isfinite(ph->energyTH)) {
+                feat->ReleaseMapPoint();
+                continue;
+            }
+            feat->ReleaseImmature();    // no longer needs the immature part
+            fr->features.push_back(feat);
+
+            // ph->setIdepthScaled(point->iR * rescaleFactor);
+            // ph->setIdepthZero(ph->idepth);
+            ph->setIdepthScaled(idepth);
+		    ph->setIdepthZero(idepth);
+
+            ph->hasDepthPrior = true;
+            ph->point->status = Point::PointStatus::ACTIVE;
+            ph->takeData(); // set the idepth into optimization
+
+        }
+
+        SE3 firstToNew = coarseInitializer->thisToNext;
         // really no lock required, as we are initializing.
         {
             unique_lock<mutex> crlock(shellPoseMutex);
@@ -1542,7 +1636,7 @@ namespace ldso {
         }
     }
 
-// applies step to linearization point.
+    // applies step to linearization point.
     bool FullSystem::doStepFromBackup(float stepfacC, float stepfacT, float stepfacR, float stepfacA, float stepfacD) {
 
         Vec10 pstepfac;
@@ -1978,5 +2072,21 @@ namespace ldso {
         f.close();
 
         LOG(INFO) << "done." << endl;
+    }
+
+    cv::Mat FullSystem::getDepthMap(shared_ptr<FrameHessian> newFrame){
+        cv::Mat image(hG[0], wG[0], CV_8UC1);
+        unsigned char *ptr = (unsigned char*)image.ptr();
+        for(int y = 0; y < image.rows; ++y)
+            for(int x = 0; x < image.cols; ++x)
+                ptr[y*wG[0]+x]=fh->dI[y*wG[0]+x][0];
+        cv::Mat depth;
+        cv::cvtColor ( image, image, CV_GRAY2BGR );
+    
+        depthPredictor->inference(image, depth);
+        //depth = 0.3128f / (depth + 0.00001f);
+
+        return depth;
+
     }
 }

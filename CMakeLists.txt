@@ -26,12 +26,20 @@ LIST(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 # TODO: change this to not output outside build dir
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
-
+# the path to libtorch
+set(CMAKE_PREFIX_PATH ${PROJECT_SOURCE_DIR}/libtorch)
 # required libs
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Glog REQUIRED)
 find_package(Pangolin REQUIRED)
+
+
+
+#new added packages
+# please remember that install libtorch from the official source of pytorch.
+find_package(Torch REQUIRED)
+find_package(CUDA)
 
 # optional libs
 find_package(LibZip QUIET)
@@ -66,6 +74,7 @@ include_directories(
 
 set( THIRD_PARTY_LIBS
         ${OpenCV_LIBS}
+        ${TORCH_LIBRARIES}
         ${GLOG_LIBRARY}
         ${Pangolin_LIBRARIES}
         ${PROJECT_SOURCE_DIR}/thirdparty/g2o/lib/libg2o${CMAKE_SHARED_LIBRARY_SUFFIX}

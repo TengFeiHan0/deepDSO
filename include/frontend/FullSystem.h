@@ -21,9 +21,12 @@
 #include "internal/IndexThreadReduce.h"
 #include "LoopClosing.h"
 
+#include <monodept2/monodepth.h>
+
 using namespace std;
 using namespace ldso;
 using namespace ldso::internal;
+using namespace ldso::monodepth2;
 
 const int MAX_ACTIVE_FRAMES = 100;
 
@@ -46,6 +49,9 @@ namespace ldso {
 
         struct ImmaturePointTemporaryResidual;
     }
+    namespace monodepth2{
+        class MonoDepth;
+    }
 
     /**
      * FullSystem is the top-level interface of DSO system
@@ -56,10 +62,10 @@ namespace ldso {
     public:
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 
-        FullSystem(shared_ptr<ORBVocabulary> voc);
+        FullSystem(shared_ptr<ORBVocabulary> voc, const std::string &m_path);
 
         ~FullSystem();
-
+    
         /// adds a new frame, and creates point & residual structs.
         void addActiveFrame(ImageAndExposure *image, int id);
 
@@ -174,7 +180,8 @@ namespace ldso {
          * @param newFrame
          */
         void initializeFromInitializer(shared_ptr<FrameHessian> newFrame);
-
+        
+        void initializeFromInitializerCNN(shared_ptr<FrameHessian> newFrame);
         /**
          * set the marginalization flag for frames need to be margined
          * @param newFH
@@ -262,10 +269,9 @@ namespace ldso {
         /// print the residual in optimization
         void printOptRes(const Vec3 &res, double resL, double resM, double resPrior, double LExact, float a,
                          float b);
-
-    public:
-        shared_ptr<Camera> Hcalib = nullptr;    // calib information
-
+        //get depth map from monodepth2                 
+        cv::Mat getDepthMap(shared_ptr<FrameHessian> fh);                 
+       
     private:
         // data
         // =================== changed by tracker-thread. protected by trackMutex ============
@@ -312,26 +318,26 @@ namespace ldso {
         thread mappingThread;
         bool runMapping = true;
         bool needToKetchupMapping = false;
+        bool needGPU = false;
+        
+        shared_ptr<PangolinDSOViewer> viewer = nullptr;
 
     public:
+        shared_ptr<Camera> Hcalib = nullptr;    // calib information
+        //depth estimation 
+        shared_ptr<MonoDepth> depthPredictor = nullptr;
         shared_ptr<Map> globalMap = nullptr;    // global map
         FeatureDetector detector;   // feature detector
         // ========================== loop closing ==================================== //
-    public:
         shared_ptr<ORBVocabulary> vocab = nullptr;  // vocabulary
         shared_ptr<LoopClosing> loopClosing = nullptr;  // loop closing
 
         // ========================= visualization =================================== //
-    public:
         void setViewer(shared_ptr<PangolinDSOViewer> v) {
             viewer = v;
             if (viewer)
                 viewer->setMap(globalMap);
         }
-
-    private:
-        shared_ptr<PangolinDSOViewer> viewer = nullptr;
-
         // ========================= debug =================================== //
     public:
         /**

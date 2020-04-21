@@ -8,7 +8,7 @@
 using namespace std;
 using namespace cv;
 using namespace at;
-namespace monodepth{
+namespace monodepth2{
 
 
 typedef enum _DEVICE_TYPE_
@@ -24,7 +24,7 @@ class MonoDepth{
             ~MonoDepth();
 
             /// Infer depth from image (implementation)
-            void inference(cv::Mat& image, cv::Mat& depth, int height, int width);
+            void inference(cv::Mat& image, cv::Mat& depth);
             //transform disp into depth
             void disp2Depth(cv::Mat &dispMap, cv::Mat &depthMap);
         private:

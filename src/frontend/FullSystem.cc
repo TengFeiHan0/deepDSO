@@ -16,12 +16,14 @@
 #include <iomanip>
 #include <opencv2/highgui/highgui.hpp>
 
+#include "monodepth2/monodepth.h"
 using namespace ldso;
 using namespace ldso::internal;
-
+using namespace ldso::monodepth2;
+using namespace std;
 namespace ldso {
 
-    FullSystem::FullSystem(shared_ptr<ORBVocabulary> voc) :
+    FullSystem::FullSystem(shared_ptr<ORBVocabulary> voc, const std::string &m_path) :
         coarseDistanceMap(new CoarseDistanceMap(wG[0], hG[0])),
         coarseTracker(new CoarseTracker(wG[0], hG[0])),
         coarseTracker_forNewKF(new CoarseTracker(wG[0], hG[0])),
@@ -29,13 +31,7 @@ namespace ldso {
         ef(new EnergyFunctional()),
         Hcalib(new Camera(fxG[0], fyG[0], cxG[0], cyG[0])),
         globalMap(new Map(this)),
-        vocab(voc) {
-
-        LOG(INFO) << "This is Direct Sparse Odometry, a fully direct VO proposed by TUM vision group."
-            "For more information about dso, see Direct Sparse Odometry, J. Engel, V. Koltun, "
-            "D. Cremers, In arXiv:1607.02565, 2016. For loop closing part, see "
-            "LDSO: Direct Sparse Odometry with Loop Closure, X. Gao, R. Wang, N. Demmel, D. Cremers, "
-            "In International Conference on Intelligent Robots and Systems (IROS), 2018 " << endl;
+        vocab(voc){
 
         Hcalib->CreateCH(Hcalib);
         lastCoarseRMSE.setConstant(100);
@@ -44,6 +40,8 @@ namespace ldso {
 
         pixelSelector = shared_ptr<PixelSelector>(new PixelSelector(wG[0], hG[0]));
         selectionMap = new float[wG[0] * hG[0]];
+
+        depthPredictor = shared_ptr<MonoDepth>(new MonoDepth(m_path, needGPU));
 
         if (setting_enableLoopClosing) {
             loopClosing = shared_ptr<LoopClosing>(new LoopClosing(this));
@@ -1287,6 +1285,12 @@ namespace ldso {
             int numPointsTotal = pixelSelector->makeMaps(newFrame, selectionMap, setting_desiredImmatureDensity);
             newFrame->frame->features.reserve(numPointsTotal);
 
+            cv::Mat depth = getDepthMap(newFrame);
+
+            for (IOWrap::Output3DWrapper *ow : outputWrapper)
+                ow->pushCNNImage(depth);
+            float* depthmap_ptr = (float*) depth.data;
+            
             for (int y = patternPadding + 1; y < hG[0] - patternPadding - 2; y++)
                 for (int x = patternPadding + 1; x < wG[0] - patternPadding - 2; x++) {
                     int i = x + y * wG[0];
@@ -1978,5 +1982,21 @@ namespace ldso {
         f.close();
 
         LOG(INFO) << "done." << endl;
+    }
+
+    cv::Mat FullSystem::getDepthMap(shared_ptr<FrameHessian> newFrame){
+        cv::Mat image(hG[0], wG[0], CV_8UC1);
+        unsigned char *ptr = (unsigned char*)image.ptr();
+        for(int y = 0; y < image.rows; ++y)
+            for(int x = 0; x < image.cols; ++x)
+                ptr[y*wG[0]+x]=fh->dI[y*wG[0]+x][0];
+        cv::Mat depth;
+        cv::cvtColor ( image, image, CV_GRAY2BGR );
+    
+        depthPredictor->inference(image, depth);
+        //depth = 0.3128f / (depth + 0.00001f);
+
+        return depth;
+
     }
 }

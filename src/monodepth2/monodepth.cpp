@@ -19,7 +19,7 @@ using namespace std;
 using namespace cv; // opencv
 using namespace at; //pytorch c++ api
 
-namespace monodepth
+namespace monodepth2
 {
   //read torchscript
 MonoDepth::MonoDepth(const std::string &model_file, int use_gpu) : model_file_(model_file), use_gpu_(use_gpu)
@@ -40,7 +40,9 @@ MonoDepth::MonoDepth(const std::string &model_file, int use_gpu) : model_file_(m
 // Destructor (interface)
 MonoDepth::~MonoDepth() = default;
 
-void MonoDepth::inference(cv::Mat &image, cv::Mat &depth, int height, int width){
+void MonoDepth::inference(cv::Mat &image, cv::Mat &depth){
+    const int height = 192;
+    const int width = 640;
     depth = MonoDepth::inference(image, height, width);
     //MonoDepth::disp2Depth(disp, depth);
     cout<<"got final depthmap"<<endl;

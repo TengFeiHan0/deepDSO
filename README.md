@@ -6,7 +6,7 @@ In this project, we extend direct sparse odometry(DSO) with a self-supervised de
 # Installation
 ## Dependencies
 ### required
-- [libtorch](https://pytorch.org/get-started/locally/)
+- [libtorch](https://pytorch.org/get-started/locally/)(`c++11`)
 - OpenCV3+
 - CUDA(10.1)
 - [Protobuf >= 3.8.x](https://github.com/google/protobuf/releases)

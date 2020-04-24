@@ -19,7 +19,7 @@ TensorRT is one the applicable inference framework which reduces the consumed in
 - prepare all required libs mentioned before, and download this projet.
 
              git clone https://github.com/TengFeiHan0/deepDSO.git 
-- refer to [monodepth2.cpp](https://github.com/TengFeiHan0/monodepth2.cpp) and download the required torchscript model, please download libtorch and put this dir under /deepDSO/lib/ 
+- refer to [monodepth2.cpp](https://github.com/TengFeiHan0/monodepth2.cpp) and download the required torchscript model, please don't forget to download `libtorch` and put this dir under `deepDSO/lib/` 
 - Build
 
 		cd deepDSO

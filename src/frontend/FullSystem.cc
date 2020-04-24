@@ -1290,7 +1290,11 @@ namespace ldso {
             for (IOWrap::Output3DWrapper *ow : outputWrapper)
                 ow->pushCNNImage(depth);
             float* depthmap_ptr = (float*) depth.data;
+<<<<<<< HEAD
 
+=======
+            
+>>>>>>> master
             for (int y = patternPadding + 1; y < hG[0] - patternPadding - 2; y++)
                 for (int x = patternPadding + 1; x < wG[0] - patternPadding - 2; x++) {
                     int i = x + y * wG[0];

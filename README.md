@@ -20,7 +20,7 @@ In this project, we extend direct sparse odometry(DSO) with a self-supervised de
 | packnet-semantic[3]* |mono| 0.100 | 0.761 | 4.270 | 0.175 | **0.902** | **0.965** | 0.982 |
 | DVSO[4] | stereo|**0.092** | **0.547** | **3.390** | **0.177** | 0.898 | 0.962 | 0.982 |
 | our | mono|0.113 | 0.818 | 4.621 | 0.190 | 0.875 | 0.958 |0.982 |
-|D3VO | mono|0.099 | 0.763 | 4.485 |0.185  | 0.885 | 0.958 |0.979 |
+|D3VO[5] | mono|0.099 | 0.763 | 4.485 |0.185  | 0.885 | 0.958 |0.979 |
 # Installation
 ## Dependencies
 ### required
